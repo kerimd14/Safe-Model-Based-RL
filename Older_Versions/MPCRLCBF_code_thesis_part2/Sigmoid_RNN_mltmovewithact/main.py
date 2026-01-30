@@ -1,7 +1,5 @@
-import multiprocessing
 import os
 import copy
-import optuna
 import numpy as np
 import casadi as cs
 
@@ -13,19 +11,26 @@ from config import (
     CONSTRAINTS_X,
     CONSTRAINTS_U,
 )
-from Classes import env, RLclass, RNN
-from Functions import (
-    run_simulation,
-    run_simulation_randomMPC,
-    generate_experiment_notes,
-    objective,
-    save_best_results
-)
+from mpc.validation import run_simulation
+from rnn.rnn import RNN
+from envs.env import env as Env
+from viz.viz import generate_experiment_notes
 
+from mpc.validation import run_simulation
+from viz.viz import generate_experiment_notes
+from viz import viz as viz_mod
+
+from rl.trainer import Trainer
+from rl.evaluator import Evaluator
+
+from rl.lrscheduler import LearningRateScheduler  # <- dataclass/state object
+from rl.rlagent import RLagent 
 
 def main():
     """
-    Main for raining a CBF RNN with MPC in a moving-obstacle environment.
+    Main for training a CBF RNN with MPC in a moving-obstacle environment.
+    
+    
     """
     
     # ─── Experiment variables ────────────────────────────────────────────
@@ -37,7 +42,7 @@ def main():
     noise_variance = 5
     decay_at_end = 0.01
     
-    num_episodes = 3000
+    num_episodes = 12
     episode_update_freq = 3  # frequency of updates (e.g. update every 10 episodes)
     decay_rate = 1 - np.power(decay_at_end, 1 / (num_episodes / episode_update_freq))
     print(f"Computed noise decay_rate: {decay_rate:.4f}")
@@ -62,11 +67,7 @@ def main():
     
     
     #name of folder where the experiment is saved
-    experiment_folder = "SRNNCBF_3"
-    
-    #check if file exists already, if yes raise an exception
-    # if os.path.exists(experiment_folder):
-    #     raise FileExistsError(f"Experiment folder '{experiment_folder}' already exists. Please choose a different name.")
+    experiment_folder = "SRNNCBF_4"
     
     
     # ──Linear dynamics and MPC parameters───────────────────────────────────
@@ -91,6 +92,7 @@ def main():
     }
     
      # ─── Obstacle configuration ──────────────────────────────────────────────
+     
     # positions = [(-2.0, -1.5), (-3.0, -3.0)]
     # radii     = [0.75, 0.75]
     # modes     = ["step_bounce", "step_bounce"]
@@ -125,33 +127,42 @@ def main():
     
     # ─── The Learning  ─────────────────────────────────────
     
-    # run simulation of random MPC to see how the system behaves under initial random noise
-    
-    # run_simulation_randomMPC(
-    #     params_init,
-    #     env,
-    #     experiment_folder,
-    #     episode_duration,
-    #     layers_list,
-    #     initial_noise_scale,
-    #     noise_variance,
-    #     mpc_horizon,
-    #     positions,
-    #     radii,
-    #     modes,
-    #     copy.deepcopy(mode_params),
-    #     slack_penalty_MPC_L1, 
-    #     slack_penalty_MPC_L2,
-    # )
-    
     # run simulation to get the initial policy before training
     stage_cost_before = run_simulation(
-        params_init,
-        env,
-        experiment_folder,
-        episode_duration,
-        layers_list,
-        after_updates=False,
+    params_init,
+    Env,
+    experiment_folder,
+    episode_duration,
+    layers_list,
+    after_updates=False,
+    horizon=mpc_horizon,
+    positions=positions,
+    radii=radii,
+    modes=modes,
+    mode_params=copy.deepcopy(mode_params),
+    slack_penalty_MPC_L1=slack_penalty_MPC_L1,
+    slack_penalty_MPC_L2=slack_penalty_MPC_L2,
+    )
+
+    # 2) scheduler state object (NOT the update function)
+    lr_sched = LearningRateScheduler(
+        alpha=alpha,
+        patience_threshold=patience,
+        lr_decay_factor=lr_decay,
+    )
+
+    # 3) agent object (use your refactored RLAgent OR your existing RLclass)
+    agent = RLagent(
+        params_init=params_init,
+        seed=seed,
+        alpha=alpha,                    # optional if you set agent.alpha later
+        gamma=gamma,
+        decay_rate=decay_rate,
+        layers_list=layers_list,
+        noise_scalingfactor=initial_noise_scale,
+        noise_variance=noise_variance,
+        patience_threshold=patience,
+        lr_decay_factor=lr_decay,
         horizon=mpc_horizon,
         positions=positions,
         radii=radii,
@@ -159,45 +170,36 @@ def main():
         mode_params=copy.deepcopy(mode_params),
         slack_penalty_MPC_L1=slack_penalty_MPC_L1,
         slack_penalty_MPC_L2=slack_penalty_MPC_L2,
+        slack_penalty_RL_L1=slack_penalty_RL_L1,
+        slack_penalty_RL_L2=slack_penalty_RL_L2,
+        violation_penalty=violation_penalty,
     )
-    
-    # use RL to train the RNN CBF with MPC
-    
-    rl_agent = RLclass(
-        params_init,
-        seed,
-        alpha,
-        gamma,
-        decay_rate,
-        layers_list,
-        initial_noise_scale,
-        noise_variance,
-        patience,
-        lr_decay,
-        mpc_horizon,
-        positions,
-        radii,
-        modes,
-        copy.deepcopy(mode_params),
-        slack_penalty_MPC_L1,
-        slack_penalty_MPC_L2,
-        slack_penalty_RL_L1,
-        slack_penalty_RL_L2,
-        violation_penalty
+
+    # make sure agent uses scheduler alpha as source of truth
+    agent.alpha = lr_sched.alpha
+
+    # 4) evaluator object (separate thing)
+    evaluator = Evaluator(
+        agent,
+        viz_mod
     )
-    trained_params = rl_agent.rl_trainingloop(
+
+    # 5) trainer
+    trainer = Trainer(agent=agent, evaluator=evaluator, viz=viz_mod, lr_scheduler=lr_sched)
+
+    # 6) train
+    trained_params = trainer.rl_trainingloop(
         episode_duration=episode_duration,
         num_episodes=num_episodes,
         replay_buffer=replay_buffer_size,
         episode_updatefreq=episode_update_freq,
         experiment_folder=experiment_folder,
     )
-    
-    # evaluate the trained policy
-    
+
+    # 7) stage_cost_after (KEEP EXACTLY AS YOU HAVE)
     stage_cost_after = run_simulation(
         trained_params,
-        env,
+        Env,
         experiment_folder,
         episode_duration,
         layers_list,
@@ -210,8 +212,8 @@ def main():
         slack_penalty_MPC_L1=slack_penalty_MPC_L1,
         slack_penalty_MPC_L2=slack_penalty_MPC_L2,
     )
-    
-    #save experiment configuration and results
+
+    # 8) notes (KEEP EXACTLY AS YOU HAVE)
     generate_experiment_notes(
         experiment_folder,
         trained_params,
@@ -244,40 +246,7 @@ def main():
         slack_penalty_RL_L2,
         violation_penalty
     )
-
-    # append final stage-cost to folder name
-    suffix = f"_stagecost_{stage_cost_after:.2f}"
-    os.rename(experiment_folder, experiment_folder + suffix)
-    
     
 if __name__ == "__main__":
     main()
-# BASE_DIR = "optuna_runs_1"
-# if __name__ == "__main__":
-    
-#     os.makedirs(BASE_DIR, exist_ok=True)
-
-#     storage_path = os.path.join(BASE_DIR, "optuna.db")
-#     storage_uri  = f"sqlite:///{storage_path}"
-    
-#     # optuna.delete_study(study_name="my_rnn_mpc_study", storage="sqlite:///optuna_runs/optuna.db")
-#     study = optuna.create_study(
-#         storage=storage_uri,  
-#         study_name="rnn_mpc_study",
-#         direction="minimize",
-#         sampler=optuna.samplers.TPESampler(),
-#         pruner=optuna.pruners.MedianPruner(n_warmup_steps=5),
-#         load_if_exists=True,   # <-- resume if the DB file already exists
-#     )
-#     optuna.logging.set_verbosity(optuna.logging.INFO)
-    
-#     #n_jobs = 1 to run trials sequentially, running in parallel is not supported in this context
-#     # matplotlib and casadi are not thread-safe
-#     study.optimize(objective, n_trials=50, n_jobs = 1)
-
-#     print("Best trial:",  study.best_trial.number)
-#     print("  Value: ",    study.best_value)
-#     print("  Params:",    study.best_params)
-    
-#     save_best_results(study)
 
