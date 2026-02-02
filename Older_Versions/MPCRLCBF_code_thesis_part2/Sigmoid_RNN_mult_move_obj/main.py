@@ -62,7 +62,7 @@ def main():
     
     
     #name of folder where the experiment is saved
-    experiment_folder = "RNN_mult_move_obj_experiment_351"
+    experiment_folder = "RNN_mult_move_obj_experiment_352"
     
     #check if file exists already, if yes raise an exception
     # if os.path.exists(experiment_folder):

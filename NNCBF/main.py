@@ -65,10 +65,6 @@ def main():
     #name of folder where the experiment is saved
     experiment_folder = "NNSigmoid_52_noP_diag"
     
-    #check if file exists already, if yes raise an exception
-    # if os.path.exists(experiment_folder):
-    #     raise FileExistsError(f"Experiment folder '{experiment_folder}' already exists. Please choose a different name.")
-    
     
     # ──Linear dynamics and MPC parameters───────────────────────────────────
     params_init = {
@@ -109,12 +105,6 @@ def main():
 
 ]
 
-#     positions = [(-4.0, -4.25)]
-#     radii     = [1.5]
-#     modes     = ["static"]
-#     mode_params = [
-#     {"bounds": (-2.0,  -2.0), "speed": 0.0},
-# ]
     
     # ─── Build & initialize NN CBF ───────────────────────────────────────────
 
@@ -133,24 +123,6 @@ def main():
     
     
     # ─── The Learning  ─────────────────────────────────────
-    
-    # run simulation of random MPC to see how the system behaves under initial random noise
-    
-    # run_simulation_randomMPC(
-    #     params_init,
-    #     env,
-    #     experiment_folder,
-    #     episode_duration,
-    #     layers_list,
-    #     initial_noise_scale,
-    #     noise_variance,
-    #     mpc_horizon,
-    #     positions,
-    #     radii,
-    #     modes,
-    #     copy.deepcopy(mode_params),
-    #     slack_penalty_MPC,
-    # )
     
     # run simulation to get the initial policy before training
     stage_cost_before = run_simulation(
@@ -189,6 +161,7 @@ def main():
         slack_penalty_MPC,
         slack_penalty_RL,
     )
+    
     trained_params = rl_agent.rl_trainingloop(
         episode_duration=episode_duration,
         num_episodes=num_episodes,
@@ -254,38 +227,6 @@ if __name__ == "__main__":
     main()
     
     
-# BASE_DIR = "optuna_runs_1"
-# if __name__ == "__main__":
-    
-#     os.makedirs(BASE_DIR, exist_ok=True)
-
-#     storage_path = os.path.join(BASE_DIR, "optuna.db")
-#     storage_uri  = f"sqlite:///{storage_path}"
-    
-#     # optuna.delete_study(study_name="my_nn_mpc_study", storage="sqlite:///optuna_runs/optuna.db")
-#     study = optuna.create_study(
-#         storage=storage_uri,  
-#         study_name="nn_mpc_study",
-#         direction="minimize",
-#         sampler=optuna.samplers.TPESampler(),
-#         pruner=optuna.pruners.MedianPruner(n_warmup_steps=5),
-#         load_if_exists=True,   # <-- resume if the DB file already exists
-#     )
-#     optuna.logging.set_verbosity(optuna.logging.INFO)
-    
-#     #n_jobs = 1 to run trials sequentially, running in parallel is not supported in this context
-#     # matplotlib and casadi are not thread-safe
-#     study.optimize(objective, n_trials=50, n_jobs = 1)
-
-#     print("Best trial:",  study.best_trial.number)
-#     print("  Value: ",    study.best_value)
-#     print("  Params:",    study.best_params)
-    
-#     save_best_results(study)
-
-
-
-
 
 
 

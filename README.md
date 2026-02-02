@@ -5,7 +5,7 @@ The code implements an MPC-based RL framework in which **Control Barrier Functio
 
 Paper:
 **Kerim Dzhumageldyev, Filippo Airaldi, Azita Dabiri**  
-*Safe model-based Reinforcement Learning via Model Predictive Control and Control Barrier Functions* :contentReference[oaicite:0]{index=0}  
+*Safe model-based Reinforcement Learning via Model Predictive Control and Control Barrier Functions*
 arXiv: https://arxiv.org/abs/2512.04856  
 **Submitted to:** IFAC World Congress 2026
 

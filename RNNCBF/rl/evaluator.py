@@ -123,7 +123,7 @@ class Evaluator:
             alphas.append(alpha)
 
             action = cs.fmin(cs.fmax(cs.DM(action), -CONSTRAINTS_U), CONSTRAINTS_U)
-            stage_cost_eval.append(self.agent.stage_cost(action, state, self.agent.S_VMPC, hx))
+            stage_cost_eval.append(self.agent.stage_cost_validation(action, state, hx))
 
             # Environment step
             state, _, done, _, _ = self.agent.env.step(action)

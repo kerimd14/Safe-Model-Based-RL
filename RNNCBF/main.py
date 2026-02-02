@@ -47,7 +47,7 @@ def main():
     print(f"Computed noise decay_rate: {decay_rate:.4f}")
 
     # RL hyper-parameters
-    alpha = 7e-5      # initial learning rate
+    alpha = 7e-3      # initial learning rate
     gamma = 0.95       # discount factor
     slack_penalty_MPC_L1 = 2e7  # penalty on slack variables in CBF constraints for the MPC stage cost
     slack_penalty_MPC_L2 = 0#1e3
@@ -66,7 +66,7 @@ def main():
     
     
     #name of folder where the experiment is saved
-    experiment_folder = "RNN_exp2"
+    experiment_folder = "RNN_exp3"
     
     
     # ──Linear dynamics and MPC parameters───────────────────────────────────

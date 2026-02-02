@@ -65,7 +65,7 @@ class RLagent:
             self.obst_motion = ObstacleMotion(positions, modes, mode_params)
 
             # layer list of input
-            self.rnn_input_size = layers_list[0]
+            self.nn_input_size = layers_list[0]
             self.layers_list = layers_list
 
             # Parameters of experiments and states
@@ -88,8 +88,8 @@ class RLagent:
 
             # CBF safety constraints: h(x_{k+1})-h(x_k)+alpha*h(x_k) + s >= 0 → we invert so g =< 0
             # means the cbf constraint is bounded between -inf and zero --> for the g =< 0
-            self.cbf_const_lbg = -np.inf * np.ones(self.mpc.rnn.obst.obstacle_num * (self.horizon))
-            self.cbf_const_ubg = np.zeros(self.mpc.rnn.obst.obstacle_num * (self.horizon))
+            self.cbf_const_lbg = -np.inf * np.ones(self.mpc.nn.obst.obstacle_num * (self.horizon))
+            self.cbf_const_ubg = np.zeros(self.mpc.nn.obst.obstacle_num * (self.horizon))
 
             # Discount factor for TD updates
             self.gamma = gamma
@@ -120,12 +120,12 @@ class RLagent:
             self.current_patience = 0
 
             # ADAM
-            theta_vector_num = cs.vertcat(self.params_init["rnn_params"])
+            theta_vector_num = cs.vertcat(self.params_init["nn_params"])
             self.adam = AdamOptimizer(dim=int(theta_vector_num.shape[0]))
 
-            print(f"before make rnn step")
+            print(f"before make nn step")
             # hidden state 1 function
-            self.get_hidden_func = self.mpc.rnn.make_rnn_step()
+            self.get_hidden_func = self.mpc.nn.make_nn_step()
 
             print(f"before flat input")
             self.flat_input_fn = self.mpc.make_flat_input_fn()
@@ -139,9 +139,7 @@ class RLagent:
 
             print(f"before make h functions")
             # construct list to extract h(x_{k},k)
-            self.h_func_list = self.mpc.rnn.obst.make_h_functions()
-
-            self.spectral_radii_hist = []
+            self.h_func_list = self.mpc.nn.obst.make_h_functions()
             print(f"initialization done")
             
             #learning rate scheduler data class (so its just a conainer for data)
@@ -185,7 +183,6 @@ class RLagent:
             else:
                 return (dist / max_radius)**2
             
-
         def v_mpc(self, params, x, xpred_list, ypred_list):
             """
             Solve the value-function MPC problem for the current state.
@@ -210,7 +207,7 @@ class RLagent:
                 hidden_t1 :  
                     Updated hidden states after one NN forward pass.
             """
-
+            
             # bounds
 
             # input bounded between 1 and -1
@@ -218,16 +215,16 @@ class RLagent:
             U_upper_bound = np.ones(self.na * (self.horizon))
 
             # state constraints (first state is bounded to be x0), omega cannot be 0
-            lbx = np.concatenate([np.array(x).flatten(), self.X_lower_bound, U_lower_bound,
-                                np.zeros(self.mpc.nn.obst.obstacle_num *self.horizon)])
-            ubx = np.concatenate([np.array(x).flatten(), self.X_upper_bound, U_upper_bound,
-                                np.inf*np.ones(self.mpc.nn.obst.obstacle_num *self.horizon)])
+            lbx = np.concatenate([np.array(x).flatten(), self.X_lower_bound, U_lower_bound,  
+                                  np.zeros(self.mpc.nn.obst.obstacle_num *self.horizon)])  
+            ubx = np.concatenate([np.array(x).flatten(), self.X_upper_bound, U_upper_bound, 
+                                  np.inf*np.ones(self.mpc.nn.obst.obstacle_num *self.horizon)])
 
-            #lower and upper bound for state and cbf constraints
-            lbg = np.concatenate([self.state_const_lbg, self.cbf_const_lbg])
+            #lower and upper bound for state and cbf constraints 
+            lbg = np.concatenate([self.state_const_lbg, self.cbf_const_lbg])  
             ubg = np.concatenate([self.state_const_ubg, self.cbf_const_ubg])
 
-            #flatten to put it into the solver
+            #flatten to put it into the solver 
             A_flat = cs.reshape(params["A"] , -1, 1)
             B_flat = cs.reshape(params["B"], -1, 1)
             P_diag = cs.diag(params["P"])
@@ -235,12 +232,12 @@ class RLagent:
             R_flat = cs.reshape(params["R"], -1, 1)
 
             solution = self.solver_inst(p = cs.vertcat(A_flat, B_flat, params["b"], params["V0"],
-                                                    P_diag, Q_flat, R_flat,  params["nn_params"],
-                                                    xpred_list, ypred_list),
+                                                       P_diag, Q_flat, R_flat,  params["nn_params"], 
+                                                       xpred_list, ypred_list),
                 x0    = self.x_prev_VMPC,
                 lam_x0 = self.lam_x_prev_VMPC,
                 lam_g0 = self.lam_g_prev_VMPC,
-                ubx=ubx,
+                ubx=ubx,  
                 lbx=lbx,
                 ubg=ubg,
                 lbg=lbg
@@ -248,24 +245,23 @@ class RLagent:
 
             #extract first optimal control action to apply (MPC)
             u_opt = solution["x"][self.ns * (self.horizon+1):self.ns * (self.horizon+1) + self.na]
-
+            
             # warmstart variables for next iteration
             self.x_prev_VMPC     = solution["x"]
             self.lam_x_prev_VMPC = solution["lam_x"]
             self.lam_g_prev_VMPC = solution["lam_g"]
-
+            
             # remember the slack variables for stage cost computation (in the evaluation stage cost)
             self.S_VMPC = solution["x"][self.na * (self.horizon) + self.ns * (self.horizon+1):]
-
+            
             #check output  of NN
             alpha_list = []
             h_func_list = [h_func for h_func in self.mpc.nn.obst.h_obsfunc(x, xpred_list, ypred_list)]
-            alpha_list.append(cs.DM(self.fwd_func(x, h_func_list, xpred_list[:self.mpc.nn.obst.obstacle_num],
-                                                ypred_list[:self.mpc.nn.obst.obstacle_num], params["nn_params"])))
+            alpha_list.append(cs.DM(self.fwd_func(x, h_func_list, xpred_list[:self.mpc.nn.obst.obstacle_num], 
+                                                  ypred_list[:self.mpc.nn.obst.obstacle_num], params["nn_params"])))
 
             return u_opt, solution["f"], alpha_list
-
-
+        
         def v_mpc_rand(self, params, x, rand, xpred_list, ypred_list):
             """
             Solve the value-function MPC problem with injected randomness.
@@ -291,19 +287,19 @@ class RLagent:
                 u_opt (na,):
                     The first optimal control action (with randomness).
                 hidden_t1 (list of MX):
-                    Updated NN hidden-state
+                    Updated NN hidden-state 
             """
-
-
+            
+            
             # bounds
             U_lower_bound = -np.ones(self.na * (self.horizon))
             U_upper_bound = np.ones(self.na * (self.horizon))
 
-            lbx = np.concatenate([np.array(x).flatten(), self.X_lower_bound, U_lower_bound,  np.zeros(self.mpc.nn.obst.obstacle_num *self.horizon)])
+            lbx = np.concatenate([np.array(x).flatten(), self.X_lower_bound, U_lower_bound,  np.zeros(self.mpc.nn.obst.obstacle_num *self.horizon)])  
             ubx = np.concatenate([np.array(x).flatten(),self.X_upper_bound, U_upper_bound,  np.inf*np.ones(self.mpc.nn.obst.obstacle_num *self.horizon)])
+            
 
-
-            lbg = np.concatenate([self.state_const_lbg, self.cbf_const_lbg])
+            lbg = np.concatenate([self.state_const_lbg, self.cbf_const_lbg])  
             ubg = np.concatenate([self.state_const_ubg, self.cbf_const_ubg])
 
             #flatten
@@ -317,39 +313,38 @@ class RLagent:
                 x0    = self.x_prev_VMPCrandom,
                 lam_x0 = self.lam_x_prev_VMPCrandom,
                 lam_g0 = self.lam_g_prev_VMPCrandom,
-                ubx=ubx,
+                ubx=ubx,  
                 lbx=lbx,
                 ubg=ubg,
                 lbg=lbg
             )
             #extract first optimal control action to apply (MPC)
             u_opt = solution["x"][self.ns * (self.horizon+1):self.ns * (self.horizon+1) + self.na]
-
+            
             # warmstart variables for next iteration
             self.x_prev_VMPCrandom = solution["x"]
             self.lam_x_prev_VMPCrandom = solution["lam_x"]
             self.lam_g_prev_VMPCrandom = solution["lam_g"]
-
+            
             # remember the slack variables for stage cost computation (in the RL stage cost)
             self.S_VMPC_rand = solution["x"][self.na * (self.horizon) + self.ns * (self.horizon+1):]
-
+            
             #check output  of NN
             alpha_list = []
             h_func_list = [h_func for h_func in self.mpc.nn.obst.h_obsfunc(x, xpred_list, ypred_list)]
-            alpha_list.append(cs.DM(self.fwd_func(x, h_func_list, xpred_list[:self.mpc.nn.obst.obstacle_num],
-                                                ypred_list[:self.mpc.nn.obst.obstacle_num],  params["nn_params"])))
+            alpha_list.append(cs.DM(self.fwd_func(x, h_func_list, xpred_list[:self.mpc.nn.obst.obstacle_num], 
+                                                  ypred_list[:self.mpc.nn.obst.obstacle_num],  params["nn_params"])))
 
             return u_opt, alpha_list
 
-
         def q_mpc(self, params, action, x, xpred_list, ypred_list):
-
+            
             """"
-
+            
             Solve the Q-value MPC problem for current state and current action.
-
+            
             Similar to V_MPC, but includes the action in the optimization and computes the Q-value.
-
+            
             Args:
                 params (dict):
                     Dictionary of system and NN parameters.
@@ -385,14 +380,14 @@ class RLagent:
             U_upper_bound = np.ones(self.na * (self.horizon-1))
 
             #Assemble full lbx/ubx: [ x0; X(1…H); action; remaining U; slack ]
-            lbx = np.concatenate([np.asarray(x).flatten(), self.X_lower_bound,
-                                np.asarray(action).flatten(), U_lower_bound,
-                                np.zeros(self.mpc.nn.obst.obstacle_num *self.horizon)])
+            lbx = np.concatenate([np.asarray(x).flatten(), self.X_lower_bound, 
+                                  np.asarray(action).flatten(), U_lower_bound,  
+                                  np.zeros(self.mpc.nn.obst.obstacle_num *self.horizon)])  
             ubx = np.concatenate([np.asarray(x).flatten(), self.X_upper_bound,
-                                np.asarray(action).flatten(), U_upper_bound,
-                                np.inf*np.ones(self.mpc.nn.obst.obstacle_num *self.horizon)])
+                                  np.asarray(action).flatten(), U_upper_bound, 
+                                  np.inf*np.ones(self.mpc.nn.obst.obstacle_num *self.horizon)])
 
-            lbg = np.concatenate([self.state_const_lbg, self.cbf_const_lbg])
+            lbg = np.concatenate([self.state_const_lbg, self.cbf_const_lbg])  
             ubg = np.concatenate([self.state_const_ubg, self.cbf_const_ubg])
 
             #flatten
@@ -401,31 +396,32 @@ class RLagent:
             P_diag = cs.diag(params["P"])#cs.reshape(params["P"], -1, 1)
             Q_flat = cs.reshape(params["Q"], -1, 1)
             R_flat = cs.reshape(params["R"], -1, 1)
-
+            
             solution = self.solver_inst(p = cs.vertcat(A_flat, B_flat, params["b"], params["V0"], P_diag,
-                                                    Q_flat, R_flat, params["nn_params"],
-                                                    xpred_list, ypred_list),
+                                                       Q_flat, R_flat, params["nn_params"],
+                                                       xpred_list, ypred_list),
                 x0    = self.x_prev_QMPC,
                 lam_x0 = self.lam_x_prev_QMPC,
                 lam_g0 = self.lam_g_prev_QMPC,
-                ubx=ubx,
+                ubx=ubx,  
                 lbx=lbx,
                 ubg=ubg,
                 lbg=lbg
             )
-
+            
             # Extract lagrange multipliers needed for the lagrangian:
             lagrange_mult_g = solution["lam_g"]
             lam_lbx = -cs.fmin(solution["lam_x"], 0)
             lam_ubx = cs.fmax(solution["lam_x"], 0)
             lam_p = solution["lam_p"]
-
+            
             # warmstart variables for next iteration
             self.lam_g_prev_QMPC = solution["lam_g"]
             self.x_prev_QMPC = solution["x"]
             self.lam_x_prev_QMPC = solution["lam_x"]
 
             return solution["x"], solution["f"], lagrange_mult_g, lam_lbx, lam_ubx, lam_p
+        
             
         def stage_cost(self, action, state, S, hx):
             """
@@ -453,72 +449,107 @@ class RLagent:
             
             return (
                 state.T @ Qstage @ state
-                + action.T @ Rstage @ action 
-                + self.slack_penalty_RL_L1*(np.sum(S)/(self.horizon+self.mpc.rnn.obst.obstacle_num))
-                + 0.5 * self.slack_penalty_RL_L2* (np.sum(S**2) / (self.horizon+self.mpc.rnn.obst.obstacle_num)) 
-                + np.sum(self.violation_penalty*violations)
+                + action.T @ Rstage @ action +self.slack_penalty_RL*(np.sum(S)/(self.horizon+self.mpc.nn.obst.obstacle_num)) #+ np.sum(4e5*violations)
+            )
+            
+        def stage_cost_validation(self, action, state, hx):
+            """
+            Computes the stage cost : L(s,a).
+            
+            Args:
+                action: (na,):
+                    Control action vector.
+                state: (ns,):
+                    Current state vector of the system
+                S: (m*(horizon+1),):
+                    Slack variables for the MPC problem, used in the stage cost.
+                    Slacks that were used for relaxing CBF constraints in the MPC problem.
+            
+            Returns:
+                float:
+                    The computed stage cost value.
+            """
+            # same as the MPC ones
+            Qstage = np.diag([10, 10, 10, 10])
+            Rstage = np.diag([1, 1])
+            hx = np.array(hx)
+            
+            violations = np.clip(-hx, 0, None)
+            
+            return (
+                state.T @ Qstage @ state
+                + action.T @ Rstage @ action + np.sum(3e5*violations)
             )
         
-        
         def parameter_updates(self, params, B_update_avg):
-            
-            #TODO: Finish commenting and cleaning this funciton and onwards
 
             """
             function responsible for carryin out parameter updates after each episode
             """
             P_diag = cs.diag(params["P"])
-            Q_diag = cs.diag(params["Q"])
-            R_diag = cs.diag(params["R"])
 
+            #vector of parameters which are differenitated with respect to
+            # theta_vector_num = cs.vertcat(P_diag, params["nn_params"])
+            
+            theta_vector_num = cs.vertcat(params["nn_params"])
 
-            theta_vector_num = cs.vertcat(params["rnn_params"])
-
+            # L  = self.cholesky_added_multiple_identity(A_update_avg)
+            # A_update_chom = L @ L.T
+            
             identity = np.eye(theta_vector_num.shape[0])
 
-            alpha_vec = cs.vertcat(self.alpha*np.ones(theta_vector_num.shape[0]))
 
-            
+            # alpha_vec is resposible for the updates
+            # alpha_vec = cs.vertcat(self.alpha*np.ones(3), self.alpha, self.alpha, self.alpha*np.ones(theta_vector_num.shape[0]-5)*1e-2)
+            alpha_vec = cs.vertcat(self.alpha*np.ones(theta_vector_num.shape[0])*1e-2)
+            # alpha_vec = cs.vertcat(self.alpha*np.ones(4), self.alpha*np.ones(theta_vector_num.shape[0]-4)*1e-2)
+            # alpha_vec = cs.vertcat(self.alpha*np.ones(theta_vector_num.shape[0]-2), self.alpha,self.alpha*1e-5)
             print(f"B_update_avg:{B_update_avg}")
 
-            dtheta = self.adam.step(gradient=B_update_avg, learning_rate=alpha_vec)
+            dtheta, self.exp_avg, self.exp_avg_sq = self.ADAM(self.adam_iter, B_update_avg, self.exp_avg, self.exp_avg_sq, alpha_vec, 0.9, 0.999)
+            self.adam_iter += 1 
 
             print(f"dtheta: {dtheta}")
 
             # uncostrained update to compare to the qp update
-            y = np.linalg.solve(identity, dtheta)
+            y = np.linalg.solve(identity, B_update_avg)
             theta_vector_num_toprint = theta_vector_num - (y)#self.alpha * y
             print(f"theta_vector_num no qp: {theta_vector_num_toprint}")
 
+            # lbx = cs.vertcat(-np.inf*np.ones(5), -0.01*np.abs(theta_vector_num[5:]))
+            # ubx = cs.vertcat(np.inf*np.ones(5), 0.01*np.abs(theta_vector_num[5:]))
 
+            # lbx = cs.vertcat(-np.inf*np.ones(5), -0.0001*np.ones(theta_vector_num.shape[0]-5))
+            # ubx = cs.vertcat(np.inf*np.ones(5), 0.0001*np.ones(theta_vector_num.shape[0]-5))
             
             # constrained update qp update
             solution = self.qp_solver(
-                    p=cs.vertcat(theta_vector_num, -dtheta), 
-                    lbg=cs.vertcat(-np.inf*np.ones(theta_vector_num.shape[0])),
+                    p=cs.vertcat(theta_vector_num, dtheta),
+                    # lbg = cs.vertcat(np.zeros(4), -np.inf*np.ones(theta_vector_num.shape[0]-4)),
+                    # ubg = cs.vertcat(np.inf*np.ones(theta_vector_num.shape[0])),
+                    lbg= cs.vertcat(-np.inf*np.ones(theta_vector_num.shape[0])),
                     ubg = cs.vertcat(np.inf*np.ones(theta_vector_num.shape[0])),
+                    # ubx = ubx,
+                    # lbx = lbx
                 )
             stats = self.qp_solver.stats()
 
-            # if the qp fails, do not update the parameters
+
             if stats["success"] == False:
                 print("QP NOT SUCCEEDED")
                 theta_vector_num = theta_vector_num
             else:
                 theta_vector_num = theta_vector_num + solution["x"]
 
+            print(f"theta_vector_num: {theta_vector_num}")
 
-            params["rnn_params"] = theta_vector_num
-            
-            params_rnn = self.mpc.rnn.unpack_flat_parameters(params["rnn_params"])
-            self.check_whh_spectral_radii(params_rnn)
-            rhos = []
-            L = len(self.layers_list) - 1            # total layers
-            for i in range(L-1):                      # recurrent layers only (all but last)
-                Whh = np.array(params_rnn[3*i + 2])   # Wih, bih, Whh triplets → Whh index = 2 within triplet
-                eig = np.linalg.eigvals(Whh)
-                rhos.append(float(np.max(np.abs(eig)).real))
-            self.spectral_radii_hist.append(rhos)
+            # P_diag_shape = self.ns*1
+            # # #constructing the diagonal posdef P matrix 
+            # P_posdef = cs.diag(theta_vector_num[:P_diag_shape])
+
+            # params["P"] = P_posdef
+            # params["nn_params"] = theta_vector_num[P_diag_shape:]       
+            params["nn_params"] = theta_vector_num  
 
             return params
         

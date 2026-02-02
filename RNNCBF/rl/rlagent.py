@@ -538,6 +538,34 @@ class RLagent:
                 + np.sum(self.violation_penalty*violations)
             )
         
+        def stage_cost_validation(self, action, state, hx):
+            """
+            Computes the stage cost : L(s,a).
+            
+            Args:
+                action: (na,):
+                    Control action vector.
+                state: (ns,):
+                    Current state vector of the system
+                S: (m*(horizon+1),):
+                    Slack variables for the MPC problem, used in the stage cost.
+                    Slacks that were used for relaxing CBF constraints in the MPC problem.
+            
+            Returns:
+                float:
+                    The computed stage cost value.
+            """
+            # same as the MPC ones
+            Qstage = np.diag([10, 10, 10, 10])
+            Rstage = np.diag([1, 1])
+            hx = np.array(hx)
+            
+            violations = np.clip(-hx, 0, None)
+            
+            return (
+                state.T @ Qstage @ state
+                + action.T @ Rstage @ action #+ np.sum(3e5*violations)
+            )
         
         def parameter_updates(self, params, B_update_avg):
             

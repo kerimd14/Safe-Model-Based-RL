@@ -49,8 +49,6 @@ class Trainer:
         if self.lr_scheduler is not None and self.lr_scheduler.best_params is None:
             self.lr_scheduler.best_params = params.copy()
 
-        hidden_in = self.agent.rnn_warmstart(params)
-
         # for plotting
         params_history_P = [self.agent.params_init["P"]]
 
@@ -82,8 +80,8 @@ class Trainer:
             float(
                 hf(
                     cs.DM(x),
-                    xpred_list[0 : self.agent.mpc.rnn.obst.obstacle_num],
-                    ypred_list[0 : self.agent.mpc.rnn.obst.obstacle_num],
+                    xpred_list[0 : self.agent.mpc.nn.obst.obstacle_num],
+                    ypred_list[0 : self.agent.mpc.nn.obst.obstacle_num],
                 )
             )
             for hf in self.agent.h_func_list
@@ -105,13 +103,12 @@ class Trainer:
             rand = noise * self.agent.np_random.normal(loc=0, scale=self.agent.noise_variance, size=(2, 1))
 
             # noisy V-MPC action (policy provider) 
-            u, hidden_in, alpha, _ = self.agent.v_mpc_rand(
+            u, alpha, _ = self.agent.v_mpc_rand(
                 params=params,
                 x=x,
                 rand=rand,
                 xpred_list=xpred_list,
                 ypred_list=ypred_list,
-                hidden_in=hidden_in,
             )
             u = cs.fmin(cs.fmax(cs.DM(u), -CONSTRAINTS_U), CONSTRAINTS_U)
 
@@ -130,7 +127,6 @@ class Trainer:
                 x=x,
                 xpred_list=xpred_list,
                 ypred_list=ypred_list,
-                hidden_in=hidden_in,
             )
 
             statsq = self.agent.solver_inst.stats()
@@ -154,8 +150,8 @@ class Trainer:
                 float(
                     hf(
                         cs.DM(x),
-                        xpred_list[0 : self.agent.mpc.rnn.obst.obstacle_num],
-                        ypred_list[0 : self.agent.mpc.rnn.obst.obstacle_num],
+                        xpred_list[0 : self.agent.mpc.nn.obst.obstacle_num],
+                        ypred_list[0 : self.agent.mpc.nn.obst.obstacle_num],
                     )
                 )
                 for hf in self.agent.h_func_list
@@ -168,7 +164,6 @@ class Trainer:
                 x=x,
                 xpred_list=xpred_list,
                 ypred_list=ypred_list,
-                hidden_in=hidden_in,
             )
 
             statsv = self.agent.solver_inst.stats()
@@ -187,14 +182,13 @@ class Trainer:
             X = solution[: self.agent.ns * (self.agent.horizon + 1)]
 
             # phi diagnostics
-            params_rnn = self.agent.mpc.rnn.unpack_flat_parameters(params["rnn_params"])
+            params_nn = self.agent.mpc.nn.unpack_flat_parameters(params["nn_params"])
             phi = self.agent.phi_func(
                 X,
                 U,
                 cs.DM(xpred_list),
                 cs.DM(ypred_list),
-                *hidden_in,
-                *params_rnn,
+                *params_nn,
             )
             phi_list.append(np.array(phi).reshape(self.agent.horizon, self.agent.mpc.m))
 
@@ -212,10 +206,9 @@ class Trainer:
                 X,
                 U,
                 S,
-                params["rnn_params"],
+                params["nn_params"],
                 xpred_list,
                 ypred_list,
-                *hidden_in,
             )
 
             # first order update
@@ -285,8 +278,8 @@ class Trainer:
                         obs_positions=obs_positions_np,
                         hx_list=hx_list_np,
                         alphas=alphas_np,
-                        positions=self.agent.mpc.rnn.obst.positions,
-                        radii=self.agent.mpc.rnn.obst.radii,
+                        positions=self.agent.mpc.nn.obst.positions,
+                        radii=self.agent.mpc.nn.obst.radii,
                         constraints_x=CONSTRAINTS_X,
                         experiment_folder=experiment_folder,
                         step=i,
@@ -312,7 +305,6 @@ class Trainer:
                     self.eval_count += 1
 
                 # reset episode
-                hidden_in = self.agent.rnn_warmstart(params)
                 x, _ = self.agent.env.reset(seed=self.agent.seed, options={})
                 self.agent.obst_motion.reset()
                 k = 0
@@ -331,8 +323,8 @@ class Trainer:
                     float(
                         hf(
                             cs.DM(x),
-                            xpred_list[0 : self.agent.mpc.rnn.obst.obstacle_num],
-                            ypred_list[0 : self.agent.mpc.rnn.obst.obstacle_num],
+                            xpred_list[0 : self.agent.mpc.nn.obst.obstacle_num],
+                            ypred_list[0 : self.agent.mpc.nn.obst.obstacle_num],
                         )
                     )
                     for hf in self.agent.h_func_list
@@ -366,3 +358,5 @@ class Trainer:
         if self.lr_scheduler is not None and self.lr_scheduler.best_params is not None:
             return self.lr_scheduler.best_params
         return params
+    
+ 

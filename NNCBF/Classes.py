@@ -2304,7 +2304,7 @@ class RLclass:
             
             return (
                 state.T @ Qstage @ state
-                + action.T @ Rstage @ action + np.sum(3e5*violations)
+                + action.T @ Rstage @ action #+ np.sum(3e5*violations)
             )
         
         def evaluation_step(self, params, experiment_folder, episode_duration):

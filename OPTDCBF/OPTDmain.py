@@ -9,6 +9,8 @@ from OPTDfunctions import run_simulation, run_simulation_randomMPC, generate_exp
 from OPTDclasses import RLclass, env
 
 
+# NEED TO REFACTOR WHOLE CODE TO MAKE IT CLEANER LIKE NN AND RNN
+
 
 ######### Main #########
 #parameters for running the experiments
